@@ -8,11 +8,11 @@ import json
 import sys
 import argparse
 
-def detect_api_type(server_url):
+def detect_api_type(server_url, timeout=5):
     """Detect if server is llamafile (OpenAI-compatible) or Ollama."""
     try:
         # Try llamafile first (OpenAI-compatible)
-        response = requests.get(f"{server_url}/v1/models", timeout=5)
+        response = requests.get(f"{server_url}/v1/models", timeout=timeout)
         if response.status_code == 200:
             return "llamafile"
     except:
@@ -20,7 +20,7 @@ def detect_api_type(server_url):
     
     try:
         # Try Ollama
-        response = requests.get(f"{server_url}/api/tags", timeout=5)
+        response = requests.get(f"{server_url}/api/tags", timeout=timeout)
         if response.status_code == 200:
             return "ollama"
     except:
@@ -28,7 +28,7 @@ def detect_api_type(server_url):
     
     return "unknown"
 
-def check_server_status(host="localhost:11434"):
+def check_server_status(host="localhost:11434", timeout=10):
     """Check if server is running and get basic info."""
     try:
         # Build server URL
@@ -40,12 +40,12 @@ def check_server_status(host="localhost:11434"):
         print(f"Checking server status at {server_url}...")
         
         # Detect API type
-        api_type = detect_api_type(server_url)
+        api_type = detect_api_type(server_url, timeout=timeout)
         
         if api_type == "llamafile":
-            response = requests.get(f"{server_url}/v1/models", timeout=10)
+            response = requests.get(f"{server_url}/v1/models", timeout=timeout)
         elif api_type == "ollama":
-            response = requests.get(f"{server_url}/api/tags", timeout=10)
+            response = requests.get(f"{server_url}/api/tags", timeout=timeout)
         else:
             print("✗ Cannot detect server type (neither llamafile nor Ollama)")
             return []
@@ -95,7 +95,7 @@ def check_server_status(host="localhost:11434"):
         print(f"✗ Error: {e}")
         return []
 
-def test_model(model_name, host="localhost:11434"):
+def test_model(model_name, host="localhost:11434", timeout=60):
     """Test a specific model with a simple request."""
     print(f"\nTesting model '{model_name}'...")
     
@@ -106,7 +106,7 @@ def test_model(model_name, host="localhost:11434"):
         server_url = host
     
     # Detect API type
-    api_type = detect_api_type(server_url)
+    api_type = detect_api_type(server_url, timeout=timeout)
     
     if api_type == "llamafile":
         # OpenAI-compatible API format
@@ -137,7 +137,7 @@ def test_model(model_name, host="localhost:11434"):
             api_endpoint,
             json=payload,
             headers=headers,
-            timeout=60
+            timeout=timeout
         )
         
         if response.status_code == 200:
@@ -166,6 +166,10 @@ def main():
     parser = argparse.ArgumentParser(description='Diagnose Ollama connection and model availability')
     parser.add_argument('--host', default='localhost:11434', 
                        help='Server host and port (default: localhost:11434)')
+    parser.add_argument('--model', required=False,
+                       help='Model name to test. If omitted, tests the first available model')
+    parser.add_argument('--timeout', type=int, default=60,
+                       help='Request timeout in seconds (default: 60)')
     
     args = parser.parse_args()
     
@@ -173,7 +177,7 @@ def main():
     print("=" * 40)
     
     # Check server status
-    models = check_server_status(args.host)
+    models = check_server_status(args.host, timeout=args.timeout)
     
     if not models:
         print("\nTroubleshooting steps:")
@@ -187,15 +191,31 @@ def main():
         print(f"4. Verify host is correct: {args.host}")
         sys.exit(1)
     
-    # Test the first available model
-    if models:
+    # Determine which model to test
+    model_to_test = None
+    if args.model:
+        # Warn if the provided model is not among available models
+        available_names = []
+        if isinstance(models, list):
+            for m in models:
+                if isinstance(m, dict):
+                    name = m.get('name') or m.get('id')
+                    if name:
+                        available_names.append(name)
+                else:
+                    available_names.append(str(m))
+        if available_names and args.model not in available_names:
+            print(f"⚠ Model '{args.model}' not found in available models. Attempting anyway...")
+        model_to_test = args.model
+    else:
+        # Fallback to first available model
         if isinstance(models[0], dict):
-            # Ollama format
-            first_model = models[0]['name']
+            model_to_test = models[0].get('name') or models[0].get('id')
         else:
-            # llamafile format (string)
-            first_model = models[0]
-        test_model(first_model, args.host)
+            model_to_test = models[0]
+    
+    if model_to_test:
+        test_model(model_to_test, args.host, timeout=args.timeout)
     
     print("\nDiagnostic complete!")
 

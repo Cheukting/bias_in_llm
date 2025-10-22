@@ -8,5 +8,5 @@ print("Selecting columns...")
 data = ds["train"].select_columns(["prompt"])
 
 print("Saving dataset...")
-data.to_csv("experiments/toxic_prompts.csv")
+data.to_csv("toxic_prompts.csv")
 print("Dataset saved successfully")

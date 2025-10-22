@@ -167,7 +167,7 @@ class ServeOSModel:
                 
                 print(f"Found {total_rows} rows to process")
                 
-                for row_num, row in enumerate(reader, 1):
+                for row_num, row in enumerate(rows, 1):
                     if (row_num == 1) or (not row) or (not row[0].strip()):  # Skip header and empty rows
                         continue
                     
