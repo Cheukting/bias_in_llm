@@ -6,12 +6,19 @@ Diagnostic script to check Ollama connection and model availability.
 import requests
 import json
 import sys
+import argparse
 
-def check_ollama_status():
+def check_ollama_status(host="localhost:11434"):
     """Check if Ollama server is running and get basic info."""
     try:
-        print("Checking Ollama server status...")
-        response = requests.get("http://localhost:11434/api/tags", timeout=10)
+        # Build server URL
+        if not host.startswith('http'):
+            server_url = f"http://{host}"
+        else:
+            server_url = host
+            
+        print(f"Checking server status at {server_url}...")
+        response = requests.get(f"{server_url}/api/tags", timeout=10)
         
         if response.status_code == 200:
             print("✓ Ollama server is running")
@@ -44,9 +51,15 @@ def check_ollama_status():
         print(f"✗ Error: {e}")
         return []
 
-def test_model(model_name):
+def test_model(model_name, host="localhost:11434"):
     """Test a specific model with a simple request."""
     print(f"\nTesting model '{model_name}'...")
+    
+    # Build server URL
+    if not host.startswith('http'):
+        server_url = f"http://{host}"
+    else:
+        server_url = host
     
     payload = {
         "model": model_name,
@@ -56,7 +69,7 @@ def test_model(model_name):
     
     try:
         response = requests.post(
-            "http://localhost:11434/api/generate",
+            f"{server_url}/api/generate",
             json=payload,
             headers={'Content-Type': 'application/json'},
             timeout=60
@@ -79,23 +92,31 @@ def test_model(model_name):
         return False
 
 def main():
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='Diagnose Ollama connection and model availability')
+    parser.add_argument('--host', default='localhost:11434', 
+                       help='Server host and port (default: localhost:11434)')
+    
+    args = parser.parse_args()
+    
     print("Ollama Connection Diagnostic Tool")
     print("=" * 40)
     
     # Check server status
-    models = check_ollama_status()
+    models = check_ollama_status(args.host)
     
     if not models:
         print("\nTroubleshooting steps:")
         print("1. Start Ollama: ollama serve")
         print("2. Download a model: ollama pull llama3.2")
         print("3. Check if port 11434 is available")
+        print(f"4. Verify host is correct: {args.host}")
         sys.exit(1)
     
     # Test the first available model
     if models:
         first_model = models[0]['name']
-        test_model(first_model)
+        test_model(first_model, args.host)
     
     print("\nDiagnostic complete!")
 

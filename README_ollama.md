@@ -19,14 +19,27 @@ Simple script to process text from CSV files using local AI models.
    ollama pull llama3.2
    ```
 
-## Usage
-
-1. Update the model name in `serve_os_model.py` if needed (default: "llama3.2")
-2. Replace `sample_data.csv` with your actual CSV file
-3. Run the script:
+4. **Run the script:**
    ```bash
    python serve_os_model.py
    ```
+
+## Usage
+
+**Basic usage:**
+```bash
+python serve_os_model.py
+```
+
+**With custom settings:**
+```bash
+python serve_os_model.py --host localhost:11434 --model llama3.2 --csv my_data.csv --output my_results.json
+```
+
+**Remote server:**
+```bash
+python serve_os_model.py --host 192.168.1.100:11434 --model llama3.2
+```
 
 ## Troubleshooting
 
@@ -35,18 +48,24 @@ If you get connection errors, run the diagnostic tool first:
 python diagnose_connection.py
 ```
 
+**With custom host:**
+```bash
+python diagnose_connection.py --host 192.168.1.100:11434
+```
+
 This will check:
 - ✅ Server is running
 - ✅ Models are available  
 - ✅ Model responds correctly
 
-## Configuration
+## Command Line Options
 
-Edit these variables in the script:
-- `SERVER_URL`: Server URL (default: "http://localhost:11434")
-- `MODEL_NAME`: Your downloaded model name (default: "llama3.2")
-- `CSV_FILE`: Path to your CSV file (default: "sample_data.csv")
-- `OUTPUT_FILE`: Path to save results (default: "results.json")
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--host` | Server host and port | `localhost:11434` |
+| `--model` | Model name to use | `llama3.2` |
+| `--csv` | Input CSV file | `sample_data.csv` |
+| `--output` | Output JSON file | `results.json` |
 
 ## CSV Format
 
