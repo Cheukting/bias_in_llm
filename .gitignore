@@ -207,5 +207,5 @@ marimo/_lsp/
 __marimo__/
 
 # Open source .llama models
-.llama
 models/
+*.llamafile
