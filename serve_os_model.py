@@ -7,6 +7,7 @@ import csv
 import requests
 import json
 import sys
+import argparse
 from typing import List, Dict
 
 class ServeOSModel:
@@ -155,31 +156,44 @@ class ServeOSModel:
 
 def main():
     """Main function to run the processor."""
-    # Configuration
-    OLLAMA_URL = "http://localhost:11434"
-    MODEL_NAME = "openthinker:7b"  # Change this to your downloaded model name
-    CSV_FILE = "sample_data.csv"
-    OUTPUT_FILE = "results.json"
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='Process CSV text with local AI model')
+    parser.add_argument('--host', default='localhost:11434', 
+                       help='Server host and port (default: localhost:11434)')
+    parser.add_argument('--model', default='llama3.2', 
+                       help='Model name (default: llama3.2)')
+    parser.add_argument('--csv', default='sample_data.csv', 
+                       help='CSV file path (default: sample_data.csv)')
+    parser.add_argument('--output', default='results.json', 
+                       help='Output JSON file (default: results.json)')
+    
+    args = parser.parse_args()
+    
+    # Build server URL
+    if not args.host.startswith('http'):
+        server_url = f"http://{args.host}"
+    else:
+        server_url = args.host
     
     # Initialize processor
-    processor = ServeOSModel(OLLAMA_URL, MODEL_NAME)
+    processor = ServeOSModel(server_url, args.model)
     
     # Check connection
-    print("Checking Ollama connection...")
+    print(f"Checking connection to {server_url}...")
     if not processor.check_ollama_connection():
-        print("Error: Cannot connect to Ollama server.")
-        print("Make sure Ollama is running on", OLLAMA_URL)
+        print(f"Error: Cannot connect to server at {server_url}")
+        print("Make sure the server is running.")
         sys.exit(1)
     
-    print("✓ Connected to Ollama server")
+    print("✓ Connected to server")
     
     # Show available models
     models = processor.get_available_models()
     if models:
         print(f"Available models: {', '.join(models)}")
-        if MODEL_NAME not in models:
-            print(f"Warning: Model '{MODEL_NAME}' not found in available models.")
-            print("Please update MODEL_NAME in the script to match your model.")
+        if args.model not in models:
+            print(f"Warning: Model '{args.model}' not found in available models.")
+            print("Use --model <model_name> to specify a different model.")
     else:
         print("Warning: Could not retrieve available models.")
     
@@ -188,18 +202,18 @@ def main():
     if not processor.test_model_connection():
         print("Model test failed. Please check:")
         print("1. Model is downloaded: ollama pull <model_name>")
-        print("2. Model name is correct in the script")
+        print("2. Model name is correct (use --model <name>)")
         print("3. Server has enough resources")
         sys.exit(1)
     
     # Process CSV
-    print(f"\nProcessing CSV file: {CSV_FILE}")
-    results = processor.process_csv(CSV_FILE, OUTPUT_FILE)
+    print(f"\nProcessing CSV file: {args.csv}")
+    results = processor.process_csv(args.csv, args.output)
     
     if results:
         print(f"\nProcessed {len(results)} rows successfully.")
-        if OUTPUT_FILE:
-            print(f"Results saved to: {OUTPUT_FILE}")
+        if args.output:
+            print(f"Results saved to: {args.output}")
     else:
         print("No results to process.")
 
