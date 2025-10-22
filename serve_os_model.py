@@ -146,7 +146,7 @@ class ServeOSModel:
             print(f"Model test successful: {test_response[:50]}...")
             return True
     
-    def process_csv(self, csv_file_path: str, output_file_path: str = None, checkpoint_file: str = None, save_every: int = 50, resume: bool = True, output_mode: str = None) -> List[Dict]:
+    def process_csv(self, csv_file_path: str, output_file_path: str = None, checkpoint_file: str = None, save_every: int = 50, resume: bool = True, output_mode: str = None, start_row: int = None, end_row: int = None) -> List[Dict]:
         """
         Process text from CSV file and get responses from Ollama.
         
@@ -179,7 +179,32 @@ class ServeOSModel:
                 # Assume CSV has a single column of text
                 reader = csv.reader(file)
                 rows = list(reader)
-                total_rows = len([row for row in rows if row and row[0].strip() and not row[0].strip().lower() == 'text'])
+                # Explicitly skip header row
+                header = rows[0] if rows else None
+                data_rows = rows[1:] if len(rows) > 1 else []
+                # Derive selected range (1-based indices over data rows)
+                if start_row is not None and start_row < 1:
+                    start_row = 1
+                # Normalize reversed range
+                if start_row is not None and end_row is not None and end_row < start_row:
+                    start_row, end_row = end_row, start_row
+
+                selected = []  # List of tuples: (absolute_index, row)
+                last_index_in_data = len(data_rows)
+                start_idx = start_row if start_row is not None else 1
+                end_idx = end_row if end_row is not None else last_index_in_data
+                if end_idx > last_index_in_data:
+                    end_idx = last_index_in_data
+
+                for abs_idx, row in enumerate(data_rows, 1):
+                    if abs_idx < start_idx or abs_idx > end_idx:
+                        continue
+                    if not row or not row[0].strip():
+                        continue
+                    selected.append((abs_idx, row))
+
+                # Count only non-empty rows in selection
+                total_rows = len(selected)
                 
                 # Load checkpoint if requested
                 if resume and checkpoint_file and os.path.exists(checkpoint_file):
@@ -245,27 +270,26 @@ class ServeOSModel:
                                 print(f"Warning: Failed to save results: {e}")
                     # jsonl is written per-row; nothing to batch-save other than checkpoint
                 
-                for row_num, row in enumerate(rows, 1):
+                for rel_index, (abs_index, row) in enumerate(selected, 1):
                     # Skip already processed absolute indices
-                    if row_num <= last_absolute_index:
-                        continue
-                    if (row_num == 1) or (not row) or (not row[0].strip()):  # Skip header and empty rows
+                    if abs_index <= last_absolute_index:
                         continue
                     
                     text = row[0].strip()
-                    print(f"\nProcessing row {row_num}/{total_rows}: {text[:50]}...")
+                    print(f"\nProcessing row {rel_index}/{total_rows}: {text[:50]}...")
                     
                     response = self.send_message(text)
                     
                     result = {
-                        'row_number': row_num,
+                        'row_number': rel_index,
+                        'absolute_row_number': abs_index,
                         'input_text': text,
                         'response': response
                     }
                     session_results.append(result)
                     processed_count += 1
                     processed_since_save += 1
-                    last_absolute_index = row_num
+                    last_absolute_index = abs_index
                     
                     # Persist output
                     if output_file_path:
@@ -346,14 +370,18 @@ def main():
                        help='CSV file path (default: sample_data.csv)')
     parser.add_argument('--output', default='results.json', 
                        help='Output JSON file (default: results.json)')
-    parser.add_argument('--checkpoint', default='results.checkpoint.json', 
-                       help='Checkpoint file to save and resume progress (default: results.checkpoint.json)')
+    parser.add_argument('--checkpoint', default=None, 
+                       help='Checkpoint file to save and resume progress (default: derived from output)')
     parser.add_argument('--save-every', type=int, default=50, 
                        help='Save results and checkpoint every N rows (default: 50)')
     parser.add_argument('--fresh', action='store_true', 
                        help='Ignore checkpoint and start from the beginning')
     parser.add_argument('--output-mode', choices=['json', 'jsonl'], default=None,
                        help='Output mode; defaults to file extension (.jsonl -> jsonl, else json)')
+    parser.add_argument('--start-row', type=int, default=None, 
+                       help='1-based start row (data rows only, header excluded)')
+    parser.add_argument('--end-row', type=int, default=None, 
+                       help='1-based end row (inclusive; header excluded)')
     
     args = parser.parse_args()
     
@@ -394,21 +422,40 @@ def main():
         print("3. Server has enough resources")
         sys.exit(1)
     
+    # Resolve output, mode, and derived filenames if range provided
+    output_path = args.output
+    # Derive range suffix for filename, if any
+    range_suffix = None
+    if args.start_row is not None or args.end_row is not None:
+        s = args.start_row if args.start_row is not None else 1
+        e = args.end_row if args.end_row is not None else 'end'
+        range_suffix = f"_{s}-{e}"
+        root, ext = os.path.splitext(output_path)
+        output_path = f"{root}{range_suffix}{ext}"
+    
+    # Default checkpoint derived from output if not provided
+    ckpt_path = args.checkpoint
+    if ckpt_path is None and output_path:
+        root, _ = os.path.splitext(output_path)
+        ckpt_path = f"{root}.checkpoint.json"
+    
     # Process CSV
     print(f"\nProcessing CSV file: {args.csv}")
     results = processor.process_csv(
         args.csv,
-        args.output,
-        checkpoint_file=args.checkpoint,
+        output_path,
+        checkpoint_file=ckpt_path,
         save_every=args.save_every,
         resume=(not args.fresh),
         output_mode=args.output_mode,
+        start_row=args.start_row,
+        end_row=args.end_row,
     )
     
     if results:
         print(f"\nProcessed {len(results)} rows successfully.")
-        if args.output:
-            print(f"Results saved to: {args.output}")
+        if output_path:
+            print(f"Results saved to: {output_path}")
     else:
         print("No results to process.")
 
