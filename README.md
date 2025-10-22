@@ -19,7 +19,7 @@ Each team will create a new folder in the root directory of this repo and add th
 When designing your experiments, you may consider the following:
 
 - Define objectives: Determine what you want to achieve, such as assessing gender bias, measuring likeliness of generating toxic content or hate speech, etc.
-- Prepare datasets: Create or adopt datasets of prompts to test the model. You may have a look at public data set at [Kaggle](https://www.kaggle.com/datasets) or [Hugging Face](https://huggingface.co/datasets).
+- Prepare datasets: Create or adopt datasets of prompts to test the model. You may have a look at public data set at [Kaggle](https://www.kaggle.com/datasets) or [Hugging Face](https://huggingface.co/datasets). Or have a look at [this repo](https://github.com/leobeeson/llm_benchmarks).
 - Consider the LLM limitations: Be aware of the potential for "hallucinations" and performance issues.
 - Method to run experiments: How to programmatically run your experiments.
 - Capture results: How to capture the results of your experiments.
