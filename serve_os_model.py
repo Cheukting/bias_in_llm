@@ -11,40 +11,75 @@ import argparse
 from typing import List, Dict
 
 class ServeOSModel:
-    def __init__(self, ollama_url: str = "http://localhost:11434", model_name: str = "llama3.2"):
+    def __init__(self, server_url: str = "http://localhost:11434", model_name: str = "llama3.2"):
         """
-        Initialize the processor with Ollama server details.
+        Initialize the processor with server details.
         
         Args:
-            ollama_url: URL of the Ollama server (default: http://localhost:11434)
+            server_url: URL of the server (default: http://localhost:11434)
             model_name: Name of the model to use (default: llama3.2)
         """
-        self.ollama_url = ollama_url
+        self.server_url = server_url
         self.model_name = model_name
-        self.api_url = f"{ollama_url}/api/generate"
+        self.api_type = self._detect_api_type()
+        
+        if self.api_type == "llamafile":
+            self.api_url = f"{server_url}/v1/chat/completions"
+        else:  # ollama
+            self.api_url = f"{server_url}/api/generate"
     
-    def check_ollama_connection(self) -> bool:
-        """Check if Ollama server is running and accessible."""
+    def _detect_api_type(self) -> str:
+        """Detect if server is llamafile (OpenAI-compatible) or Ollama."""
         try:
-            response = requests.get(f"{self.ollama_url}/api/tags", timeout=5)
+            # Try llamafile first (OpenAI-compatible)
+            response = requests.get(f"{self.server_url}/v1/models", timeout=5)
+            if response.status_code == 200:
+                return "llamafile"
+        except:
+            pass
+        
+        try:
+            # Try Ollama
+            response = requests.get(f"{self.server_url}/api/tags", timeout=5)
+            if response.status_code == 200:
+                return "ollama"
+        except:
+            pass
+        
+        # Default to ollama if detection fails
+        return "ollama"
+    
+    def check_server_connection(self) -> bool:
+        """Check if server is running and accessible."""
+        try:
+            if self.api_type == "llamafile":
+                response = requests.get(f"{self.server_url}/v1/models", timeout=5)
+            else:  # ollama
+                response = requests.get(f"{self.server_url}/api/tags", timeout=5)
             return response.status_code == 200
         except requests.exceptions.RequestException:
             return False
     
     def get_available_models(self) -> List[str]:
-        """Get list of available models from Ollama."""
+        """Get list of available models from server."""
         try:
-            response = requests.get(f"{self.ollama_url}/api/tags")
-            if response.status_code == 200:
-                models = response.json().get('models', [])
-                return [model['name'] for model in models]
+            if self.api_type == "llamafile":
+                response = requests.get(f"{self.server_url}/v1/models")
+                if response.status_code == 200:
+                    models = response.json().get('data', [])
+                    return [model['id'] for model in models]
+            else:  # ollama
+                response = requests.get(f"{self.server_url}/api/tags")
+                if response.status_code == 200:
+                    models = response.json().get('models', [])
+                    return [model['name'] for model in models]
             return []
         except requests.exceptions.RequestException:
             return []
     
     def send_message(self, text: str, timeout: int = 120) -> str:
         """
-        Send a text message to Ollama and get response.
+        Send a text message to server and get response.
         
         Args:
             text: The input text to send to the model
@@ -53,29 +88,49 @@ class ServeOSModel:
         Returns:
             The model's response as a string
         """
-        payload = {
-            "model": self.model_name,
-            "prompt": text,
-            "stream": False
-        }
+        if self.api_type == "llamafile":
+            # OpenAI-compatible API format
+            payload = {
+                "model": self.model_name,
+                "messages": [
+                    {"role": "user", "content": text}
+                ],
+                "stream": False
+            }
+            headers = {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer sk-local-123'  # llamafile doesn't validate this
+            }
+        else:  # ollama
+            # Ollama API format
+            payload = {
+                "model": self.model_name,
+                "prompt": text,
+                "stream": False
+            }
+            headers = {'Content-Type': 'application/json'}
         
         try:
-            print(f"  Sending request to model '{self.model_name}'...")
+            print(f"  Sending request to {self.api_type} model '{self.model_name}'...")
             response = requests.post(
                 self.api_url,
                 json=payload,
-                headers={'Content-Type': 'application/json'},
+                headers=headers,
                 timeout=timeout
             )
             response.raise_for_status()
             
             result = response.json()
-            return result.get('response', 'No response received')
+            
+            if self.api_type == "llamafile":
+                return result.get('choices', [{}])[0].get('message', {}).get('content', 'No response received')
+            else:  # ollama
+                return result.get('response', 'No response received')
             
         except requests.exceptions.Timeout:
             return f"Error: Request timed out after {timeout} seconds. Model may be too slow or overloaded."
         except requests.exceptions.ConnectionError:
-            return f"Error: Cannot connect to server. Make sure Ollama is running."
+            return f"Error: Cannot connect to server. Make sure the server is running."
         except requests.exceptions.RequestException as e:
             return f"Error: {str(e)}"
     
@@ -180,12 +235,12 @@ def main():
     
     # Check connection
     print(f"Checking connection to {server_url}...")
-    if not processor.check_ollama_connection():
+    if not processor.check_server_connection():
         print(f"Error: Cannot connect to server at {server_url}")
         print("Make sure the server is running.")
         sys.exit(1)
     
-    print("✓ Connected to server")
+    print(f"✓ Connected to {processor.api_type} server")
     
     # Show available models
     models = processor.get_available_models()

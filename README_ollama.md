@@ -9,14 +9,22 @@ Simple script to process text from CSV files using local AI models.
    pip install -r requirements.txt
    ```
 
-2. **Start Ollama server:**
+2. **Start a server:**
    ```bash
+   # Option A: Ollama
    ollama serve
+   
+   # Option B: llamafile
+   ./model.llamafile --server --port 8080
    ```
 
 3. **Download a model:**
    ```bash
+   # Option A: Ollama
    ollama pull llama3.2
+   
+   # Option B: llamafile
+   # Download .llamafile from Hugging Face
    ```
 
 4. **Run the script:**
@@ -38,7 +46,11 @@ python serve_os_model.py --host localhost:11434 --model llama3.2 --csv my_data.c
 
 **Remote server:**
 ```bash
+# Ollama server
 python serve_os_model.py --host 192.168.1.100:11434 --model llama3.2
+
+# llamafile server
+python serve_os_model.py --host 192.168.1.100:8080 --model llama3.2
 ```
 
 ## Troubleshooting
@@ -50,7 +62,11 @@ python diagnose_connection.py
 
 **With custom host:**
 ```bash
+# Ollama server
 python diagnose_connection.py --host 192.168.1.100:11434
+
+# llamafile server  
+python diagnose_connection.py --host 192.168.1.100:8080
 ```
 
 This will check:
