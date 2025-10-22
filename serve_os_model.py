@@ -4,6 +4,7 @@ Simple script to connect to Ollama server and process text from CSV file.
 """
 
 import csv
+import os
 import requests
 import json
 import sys
@@ -145,18 +146,33 @@ class ServeOSModel:
             print(f"Model test successful: {test_response[:50]}...")
             return True
     
-    def process_csv(self, csv_file_path: str, output_file_path: str = None) -> List[Dict]:
+    def process_csv(self, csv_file_path: str, output_file_path: str = None, checkpoint_file: str = None, save_every: int = 50, resume: bool = True, output_mode: str = None) -> List[Dict]:
         """
         Process text from CSV file and get responses from Ollama.
         
         Args:
             csv_file_path: Path to the input CSV file
             output_file_path: Optional path to save results (default: None)
+            checkpoint_file: Optional path to save progress for resuming
+            save_every: Save results and checkpoint every N processed rows
+            resume: If True and checkpoint exists, resume from last position
+            output_mode: 'json' or 'jsonl'. If None, inferred from output path extension
             
         Returns:
             List of dictionaries containing input text and responses
         """
-        results = []
+        session_results = []  # results processed in this invocation
+        all_results = []      # complete results if using JSON array mode
+        processed_since_save = 0
+        last_absolute_index = 0  # absolute CSV row index (1-based)
+        processed_count = 0      # count of processed (non-empty, non-header) rows in total for this run
+        mode = output_mode
+        
+        if mode is None and output_file_path:
+            lower = output_file_path.lower()
+            mode = 'jsonl' if lower.endswith('.jsonl') else 'json'
+        if mode is None:
+            mode = 'json'
         
         try:
             with open(csv_file_path, 'r', encoding='utf-8') as file:
@@ -165,9 +181,74 @@ class ServeOSModel:
                 rows = list(reader)
                 total_rows = len([row for row in rows if row and row[0].strip() and not row[0].strip().lower() == 'text'])
                 
+                # Load checkpoint if requested
+                if resume and checkpoint_file and os.path.exists(checkpoint_file):
+                    try:
+                        with open(checkpoint_file, 'r', encoding='utf-8') as cf:
+                            ckpt = json.load(cf)
+                            last_absolute_index = int(ckpt.get('last_absolute_index', 0))
+                            processed_count = int(ckpt.get('processed_count', 0))
+                            print(f"Resuming from checkpoint at absolute row {last_absolute_index} ({processed_count}/{total_rows} processed).")
+                    except Exception as e:
+                        print(f"Warning: Could not load checkpoint '{checkpoint_file}': {e}. Starting fresh.")
+                        last_absolute_index = 0
+                        processed_count = 0
+                
+                # If JSON array mode and resuming, try to load existing results
+                if output_file_path and mode == 'json' and os.path.exists(output_file_path):
+                    try:
+                        with open(output_file_path, 'r', encoding='utf-8') as rf:
+                            loaded = json.load(rf)
+                            if isinstance(loaded, list):
+                                all_results = loaded
+                            else:
+                                all_results = []
+                    except Exception:
+                        all_results = []
+                
                 print(f"Found {total_rows} rows to process")
                 
+                def save_checkpoint_if_needed(force: bool = False):
+                    nonlocal processed_since_save
+                    if not checkpoint_file:
+                        return
+                    if (processed_since_save >= save_every) or force:
+                        try:
+                            ckpt_data = {
+                                'last_absolute_index': last_absolute_index,
+                                'processed_count': processed_count,
+                                'total_rows': total_rows,
+                                'output_file': output_file_path,
+                                'output_mode': mode,
+                                'model_name': self.model_name,
+                                'api_type': self.api_type,
+                            }
+                            with open(checkpoint_file, 'w', encoding='utf-8') as cf:
+                                json.dump(ckpt_data, cf, indent=2, ensure_ascii=False)
+                            print(f"Checkpoint saved at absolute row {last_absolute_index} ({processed_count}/{total_rows}).")
+                            processed_since_save = 0
+                        except Exception as e:
+                            print(f"Warning: Failed to save checkpoint: {e}")
+                
+                def save_results_if_needed(force: bool = False):
+                    nonlocal processed_since_save
+                    if not output_file_path:
+                        return
+                    if mode == 'json':
+                        if (processed_since_save >= save_every) or force:
+                            try:
+                                with open(output_file_path, 'w', encoding='utf-8') as of:
+                                    json.dump(all_results, of, indent=2, ensure_ascii=False)
+                                print(f"Results saved to: {output_file_path}")
+                                processed_since_save = 0
+                            except Exception as e:
+                                print(f"Warning: Failed to save results: {e}")
+                    # jsonl is written per-row; nothing to batch-save other than checkpoint
+                
                 for row_num, row in enumerate(rows, 1):
+                    # Skip already processed absolute indices
+                    if row_num <= last_absolute_index:
+                        continue
                     if (row_num == 1) or (not row) or (not row[0].strip()):  # Skip header and empty rows
                         continue
                     
@@ -181,7 +262,26 @@ class ServeOSModel:
                         'input_text': text,
                         'response': response
                     }
-                    results.append(result)
+                    session_results.append(result)
+                    processed_count += 1
+                    processed_since_save += 1
+                    last_absolute_index = row_num
+                    
+                    # Persist output
+                    if output_file_path:
+                        if mode == 'jsonl':
+                            try:
+                                with open(output_file_path, 'a', encoding='utf-8') as of:
+                                    of.write(json.dumps(result, ensure_ascii=False))
+                                    of.write('\n')
+                            except Exception as e:
+                                print(f"Warning: Failed to append to JSONL results: {e}")
+                        else:
+                            all_results.append(result)
+                    
+                    # Periodic saves
+                    save_results_if_needed(force=False)
+                    save_checkpoint_if_needed(force=False)
                     
                     print(f"Response: {response[:100]}...")
                     print("-" * 50)
@@ -195,9 +295,34 @@ class ServeOSModel:
         
         # Save results if output file is specified
         if output_file_path:
-            self.save_results(results, output_file_path)
+            if mode == 'json':
+                # Final save for JSON array mode
+                try:
+                    with open(output_file_path, 'w', encoding='utf-8') as of:
+                        json.dump(all_results, of, indent=2, ensure_ascii=False)
+                    print(f"Results saved to: {output_file_path}")
+                except Exception as e:
+                    print(f"Error saving results: {str(e)}")
+            # jsonl already saved incrementally
         
-        return results
+        # Always save a final checkpoint
+        if checkpoint_file:
+            try:
+                with open(checkpoint_file, 'w', encoding='utf-8') as cf:
+                    json.dump({
+                        'last_absolute_index': last_absolute_index,
+                        'processed_count': processed_count,
+                        'total_rows': total_rows,
+                        'output_file': output_file_path,
+                        'output_mode': mode,
+                        'model_name': self.model_name,
+                        'api_type': self.api_type,
+                    }, cf, indent=2, ensure_ascii=False)
+                print(f"Final checkpoint saved at absolute row {last_absolute_index} ({processed_count}/{total_rows}).")
+            except Exception as e:
+                print(f"Warning: Failed to save final checkpoint: {e}")
+        
+        return session_results
     
     def save_results(self, results: List[Dict], output_file_path: str):
         """Save results to a JSON file."""
@@ -221,6 +346,14 @@ def main():
                        help='CSV file path (default: sample_data.csv)')
     parser.add_argument('--output', default='results.json', 
                        help='Output JSON file (default: results.json)')
+    parser.add_argument('--checkpoint', default='results.checkpoint.json', 
+                       help='Checkpoint file to save and resume progress (default: results.checkpoint.json)')
+    parser.add_argument('--save-every', type=int, default=50, 
+                       help='Save results and checkpoint every N rows (default: 50)')
+    parser.add_argument('--fresh', action='store_true', 
+                       help='Ignore checkpoint and start from the beginning')
+    parser.add_argument('--output-mode', choices=['json', 'jsonl'], default=None,
+                       help='Output mode; defaults to file extension (.jsonl -> jsonl, else json)')
     
     args = parser.parse_args()
     
@@ -263,7 +396,14 @@ def main():
     
     # Process CSV
     print(f"\nProcessing CSV file: {args.csv}")
-    results = processor.process_csv(args.csv, args.output)
+    results = processor.process_csv(
+        args.csv,
+        args.output,
+        checkpoint_file=args.checkpoint,
+        save_every=args.save_every,
+        resume=(not args.fresh),
+        output_mode=args.output_mode,
+    )
     
     if results:
         print(f"\nProcessed {len(results)} rows successfully.")
