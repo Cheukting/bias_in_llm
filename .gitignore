@@ -1,3 +1,6 @@
+# macOS files
+.DS_Store
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
@@ -206,6 +209,9 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 
+# Data files
+**/*.csv
+**/*.json
+
 # Open source .llama models
-models/
-*.llamafile
+**/*.llamafile
