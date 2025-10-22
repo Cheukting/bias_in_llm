@@ -179,7 +179,11 @@ class ServeOSModel:
                 # Assume CSV has a single column of text
                 reader = csv.reader(file)
                 rows = list(reader)
-                total_rows = len([row for row in rows if row and row[0].strip() and not row[0].strip().lower() == 'text'])
+                # Explicitly skip header row
+                header = rows[0] if rows else None
+                data_rows = rows[1:] if len(rows) > 1 else []
+                # Count only non-empty data rows
+                total_rows = len([row for row in data_rows if row and row[0].strip()])
                 
                 # Load checkpoint if requested
                 if resume and checkpoint_file and os.path.exists(checkpoint_file):
@@ -245,27 +249,27 @@ class ServeOSModel:
                                 print(f"Warning: Failed to save results: {e}")
                     # jsonl is written per-row; nothing to batch-save other than checkpoint
                 
-                for row_num, row in enumerate(rows, 1):
-                    # Skip already processed absolute indices
-                    if row_num <= last_absolute_index:
+                for data_index, row in enumerate(data_rows, 1):
+                    # Skip already processed data indices
+                    if data_index <= last_absolute_index:
                         continue
-                    if (row_num == 1) or (not row) or (not row[0].strip()):  # Skip header and empty rows
+                    if (not row) or (not row[0].strip()):  # Skip empty rows
                         continue
                     
                     text = row[0].strip()
-                    print(f"\nProcessing row {row_num}/{total_rows}: {text[:50]}...")
+                    print(f"\nProcessing row {data_index}/{total_rows}: {text[:50]}...")
                     
                     response = self.send_message(text)
                     
                     result = {
-                        'row_number': row_num,
+                        'row_number': data_index,
                         'input_text': text,
                         'response': response
                     }
                     session_results.append(result)
                     processed_count += 1
                     processed_since_save += 1
-                    last_absolute_index = row_num
+                    last_absolute_index = data_index
                     
                     # Persist output
                     if output_file_path:
